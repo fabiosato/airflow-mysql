@@ -1,0 +1,60 @@
+version: '3.7'
+
+services:
+    redis:
+        image: redis
+
+    mysql:
+        image: mysql:5.7.33
+        command: mysqld --explicit_defaults_for_timestamp=ON
+        environment:
+            - MYSQL_ROOT_USER=${MYSQL_ROOT_USER}
+            - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+            - MYSQL_USER=${MYSQL_USER}
+            - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+            - MYSQL_DATABASE=${MYSQL_DATABASE}
+        volumes:
+            - mysql_data:/var/lib/mysql
+
+    webserver:
+        build: .
+        command: wait-for-it mysql:3306 -- bash -c 'airflow db init && airflow webserver'
+        depends_on:
+            - mysql
+            - redis
+        ports:
+            - 8081:8080
+        environment:
+            - AIRFLOW__CORE__SQL_ALCHEMY_CONN=mysql+mysqldb://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/airflow
+            - AIRFLOW__CELERY__RESULT_BACKEND=db+mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/airflow
+            - AIRFLOW_HOME=/usr/local/airflow
+        volumes:
+            - ./dags:/usr/local/airflow/dags
+
+
+    scheduler:
+        build: .
+        command: wait-for-it webserver:8080 -- airflow scheduler
+        depends_on:
+            - webserver
+        environment:
+            - AIRFLOW__CORE__SQL_ALCHEMY_CONN=mysql+mysqldb://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/airflow
+            - AIRFLOW__CELERY__RESULT_BACKEND=db+mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/airflow
+            - AIRFLOW_HOME=/usr/local/airflow
+        volumes:
+            - ./dags:/usr/local/airflow/dags
+
+    worker:
+        build: .
+        command: wait-for-it webserver:8080 -- airflow celery worker
+        depends_on:
+            - scheduler
+        environment:
+            - AIRFLOW__CORE__SQL_ALCHEMY_CONN=mysql+mysqldb://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/airflow
+            - AIRFLOW__CELERY__RESULT_BACKEND=db+mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql/airflow
+            - AIRFLOW_HOME=/usr/local/airflow
+        volumes:
+            - ./dags:/usr/local/airflow/dags
+
+volumes:
+    mysql_data:
